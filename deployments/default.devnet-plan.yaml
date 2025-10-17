@@ -1,23 +1,23 @@
 ---
 id: 0
-name: Testnet deployment
-network: testnet
-stacks-node: "https://api.testnet.hiro.so"
-bitcoin-node: "http://blockstack:blockstacksystem@bitcoind.testnet.stacks.co:18332"
+name: Devnet deployment
+network: devnet
+stacks-node: "http://localhost:20443"
+bitcoin-node: "http://devnet:devnet@localhost:18443"
 plan:
   batches:
     - id: 0
       transactions:
         - contract-publish:
             contract-name: lending-pool-v2
-            expected-sender: ST9NSDHK5969YF6WJ2MRCVVAVTDENWBNTFJRVZ3E
+            expected-sender: ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM
             cost: 96860
             path: "contracts\\lending-pool-v2.clar"
             anchor-block-only: true
             clarity-version: 3
         - contract-publish:
-            contract-name: tic-tac-toe-v2
-            expected-sender: ST9NSDHK5969YF6WJ2MRCVVAVTDENWBNTFJRVZ3E
+            contract-name: tic-tac-toe
+            expected-sender: ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM
             cost: 117250
             path: "contracts\\tic-tac-toe.clar"
             anchor-block-only: true

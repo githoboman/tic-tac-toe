@@ -5,10 +5,18 @@ authors = []
 telemetry = true
 cache_dir = '.\.cache'
 requirements = []
-[contracts.tic-tac-toe]
+
+[contracts.lending-pool-v2]
+path = 'contracts/lending-pool-v2.clar'
+clarity_version = 3
+epoch = 'latest'
+
+[contracts.tic-tac-toe-v2]
 path = 'contracts/tic-tac-toe.clar'
 clarity_version = 3
 epoch = 'latest'
+depends_on = ['lending-pool-v2']
+
 [repl.analysis]
 passes = ['check_checker']
 

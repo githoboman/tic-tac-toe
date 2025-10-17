@@ -1,190 +1,296 @@
-;; The Game ID to use for the next game
+;; Tic-Tac-Toe with Lending Integration
+;; Players can borrow from lending pool to play games
+
+;; Reference to lending pool
+(define-constant lending-pool-contract .lending-pool-v2)
+
+;; Constants
+(define-constant THIS_CONTRACT (as-contract tx-sender))
+(define-constant ERR_MIN_BET_AMOUNT (err u100))
+(define-constant ERR_INVALID_MOVE (err u101))
+(define-constant ERR_GAME_NOT_FOUND (err u102))
+(define-constant ERR_GAME_CANNOT_BE_JOINED (err u103))
+(define-constant ERR_NOT_YOUR_TURN (err u104))
+(define-constant ERR_BORROW_FAILED (err u105))
+(define-constant ERR_INSUFFICIENT_FUNDS (err u106))
+
+;; Data variables
 (define-data-var latest-game-id uint u0)
 
-(define-map games 
-    uint ;; Key (Game ID)
-    { ;; Value (Game Tuple)
-        player-one: principal,
-        player-two: (optional principal),
-        is-player-one-turn: bool,
+;; Game structure tracking lending status
+(define-map games uint {
+    player-one: principal,
+    player-two: (optional principal),
+    is-player-one-turn: bool,
+    bet-amount: uint,
+    board: (list 9 uint),
+    winner: (optional principal),
+    player-one-borrowed: bool,
+    player-o-borrowed: bool,
+    player-one-borrow-id: (optional uint),
+    player-o-borrow-id: (optional uint)
+})
 
-        bet-amount: uint,
-        board: (list 9 uint),
-        
-        winner: (optional principal)
-    }
-)
+;; ===== HELPER FUNCTIONS =====
+
 (define-private (validate-move (board (list 9 uint)) (move-index uint) (move uint))
     (let (
-        ;; Validate that the move is being played within range of the board
         (index-in-range (and (>= move-index u0) (< move-index u9)))
-
-        ;; Validate that the move is either an X or an O
         (x-or-o (or (is-eq move u1) (is-eq move u2)))
-
-        ;; Validate that the cell the move is being played on is currently empty
         (empty-spot (is-eq (unwrap! (element-at? board move-index) false) u0))
     )
-
-    ;; All three conditions must be true for the move to be valid
     (and (is-eq index-in-range true) (is-eq x-or-o true) empty-spot)
 ))
-(define-constant THIS_CONTRACT (as-contract tx-sender)) ;; The address of this contract itself
-(define-constant ERR_MIN_BET_AMOUNT u100) ;; Error thrown when a player tries to create a game with a bet amount less than the minimum (0.0001 STX)
-(define-constant ERR_INVALID_MOVE u101) ;; Error thrown when a move is invalid, i.e. not within range of the board or not an X or an O
-(define-constant ERR_GAME_NOT_FOUND u102) ;; Error thrown when a game cannot be found given a Game ID, i.e. invalid Game ID
-(define-constant ERR_GAME_CANNOT_BE_JOINED u103) ;; Error thrown when a game cannot be joined, usually because it already has two players
-(define-constant ERR_NOT_YOUR_TURN u104) ;; Error thrown when a player tries to make a move when it is not their turn
 
+(define-private (is-line (board (list 9 uint)) (a uint) (b uint) (c uint)) 
+    (let (
+        (a-val (unwrap! (element-at? board a) false))
+        (b-val (unwrap! (element-at? board b) false))
+        (c-val (unwrap! (element-at? board c) false))
+    )
+    (and (is-eq a-val b-val) (is-eq a-val c-val) (not (is-eq a-val u0)))
+))
+
+(define-private (has-won (board (list 9 uint))) 
+    (or
+        (is-line board u0 u1 u2)
+        (is-line board u3 u4 u5)
+        (is-line board u6 u7 u8)
+        (is-line board u0 u3 u6)
+        (is-line board u1 u4 u7)
+        (is-line board u2 u5 u8)
+        (is-line board u0 u4 u8)
+        (is-line board u2 u4 u6)
+    )
+)
+
+;; ===== GAME CREATION =====
+
+;; Traditional game creation (no lending)
 (define-public (create-game (bet-amount uint) (move-index uint) (move uint))
     (let (
-        ;; Get the Game ID to use for creation of this new game
         (game-id (var-get latest-game-id))
-        ;; The initial starting board for the game with all cells empty
         (starting-board (list u0 u0 u0 u0 u0 u0 u0 u0 u0))
-        ;; Updated board with the starting move played by the game creator (X)
-        (game-board (unwrap! (replace-at? starting-board move-index move) (err ERR_INVALID_MOVE)))
-        ;; Create the game data tuple (player one address, bet amount, game board, and mark next turn to be player two's turn)
+        (game-board (unwrap! (replace-at? starting-board move-index move) ERR_INVALID_MOVE))
         (game-data {
             player-one: contract-caller,
             player-two: none,
             is-player-one-turn: false,
             bet-amount: bet-amount,
             board: game-board,
-            winner: none
+            winner: none,
+            player-one-borrowed: false,
+            player-o-borrowed: false,
+            player-one-borrow-id: none,
+            player-o-borrow-id: none
         })
     )
+    (asserts! (> bet-amount u0) ERR_MIN_BET_AMOUNT)
+    (asserts! (is-eq move u1) ERR_INVALID_MOVE)
+    (asserts! (validate-move starting-board move-index move) ERR_INVALID_MOVE)
 
-    ;; Ensure that user has put up a bet amount greater than the minimum
-    (asserts! (> bet-amount u0) (err ERR_MIN_BET_AMOUNT))
-    ;; Ensure that the move being played is an `X`, not an `O`
-    (asserts! (is-eq move u1) (err ERR_INVALID_MOVE))
-    ;; Ensure that the move meets validity requirements
-    (asserts! (validate-move starting-board move-index move) (err ERR_INVALID_MOVE))
-
-    ;; Transfer the bet amount STX from user to this contract
     (try! (stx-transfer? bet-amount contract-caller THIS_CONTRACT))
-    ;; Update the games map with the new game data
     (map-set games game-id game-data)
-    ;; Increment the Game ID counter
     (var-set latest-game-id (+ game-id u1))
 
-    ;; Log the creation of the new game
     (print { action: "create-game", data: game-data})
-    ;; Return the Game ID of the new game
     (ok game-id)
 ))
+
+;; Create game with lending
+(define-public (create-game-with-borrow (bet-amount uint) (move-index uint) (move uint) (use-lending bool))
+    (let (
+        (game-id (var-get latest-game-id))
+        (starting-board (list u0 u0 u0 u0 u0 u0 u0 u0 u0))
+        (game-board (unwrap! (replace-at? starting-board move-index move) ERR_INVALID_MOVE))
+    )
+    (asserts! (> bet-amount u0) ERR_MIN_BET_AMOUNT)
+    (asserts! (is-eq move u1) ERR_INVALID_MOVE)
+    (asserts! (validate-move starting-board move-index move) ERR_INVALID_MOVE)
+
+    (if use-lending
+        ;; Borrow from lending pool
+        (let (
+            (borrow-id (unwrap! (contract-call? lending-pool-contract borrow-for-game bet-amount contract-caller) ERR_BORROW_FAILED))
+        )
+            ;; Borrowed STX is sent to player, now stake it into game
+            (try! (stx-transfer? bet-amount contract-caller THIS_CONTRACT))
+            
+            (map-set games game-id {
+                player-one: contract-caller,
+                player-two: none,
+                is-player-one-turn: false,
+                bet-amount: bet-amount,
+                board: game-board,
+                winner: none,
+                player-one-borrowed: true,
+                player-o-borrowed: false,
+                player-one-borrow-id: (some borrow-id),
+                player-o-borrow-id: none
+            })
+            (var-set latest-game-id (+ game-id u1))
+            (print { action: "create-game-with-borrow", data: { game-id: game-id, borrow-id: borrow-id }})
+            (ok game-id)
+        )
+        ;; Traditional game creation
+        (begin
+            (try! (stx-transfer? bet-amount contract-caller THIS_CONTRACT))
+            (map-set games game-id {
+                player-one: contract-caller,
+                player-two: none,
+                is-player-one-turn: false,
+                bet-amount: bet-amount,
+                board: game-board,
+                winner: none,
+                player-one-borrowed: false,
+                player-o-borrowed: false,
+                player-one-borrow-id: none,
+                player-o-borrow-id: none
+            })
+            (var-set latest-game-id (+ game-id u1))
+            (print { action: "create-game", data: game-id})
+            (ok game-id)
+        )
+    )
+))
+
+;; ===== JOIN GAME =====
+
+;; Traditional join (no lending)
 (define-public (join-game (game-id uint) (move-index uint) (move uint))
     (let (
-        ;; Load the game data for the game being joined, throw an error if Game ID is invalid
-        (original-game-data (unwrap! (map-get? games game-id) (err ERR_GAME_NOT_FOUND)))
-        ;; Get the original board from the game data
+        (original-game-data (unwrap! (map-get? games game-id) ERR_GAME_NOT_FOUND))
         (original-board (get board original-game-data))
-
-        ;; Update the game board by placing the player's move at the specified index
-        (game-board (unwrap! (replace-at? original-board move-index move) (err ERR_INVALID_MOVE)))
-        ;; Update the copy of the game data with the updated board and marking the next turn to be player two's turn
+        (game-board (unwrap! (replace-at? original-board move-index move) ERR_INVALID_MOVE))
         (game-data (merge original-game-data {
             board: game-board,
             player-two: (some contract-caller),
             is-player-one-turn: true
         }))
     )
+    (asserts! (is-none (get player-two original-game-data)) ERR_GAME_CANNOT_BE_JOINED) 
+    (asserts! (is-eq move u2) ERR_INVALID_MOVE)
+    (asserts! (validate-move original-board move-index move) ERR_INVALID_MOVE)
 
-    ;; Ensure that the game being joined is able to be joined
-    ;; i.e. player-two is currently empty
-    (asserts! (is-none (get player-two original-game-data)) (err ERR_GAME_CANNOT_BE_JOINED)) 
-    ;; Ensure that the move being played is an `O`, not an `X`
-    (asserts! (is-eq move u2) (err ERR_INVALID_MOVE))
-    ;; Ensure that the move meets validity requirements
-    (asserts! (validate-move original-board move-index move) (err ERR_INVALID_MOVE))
-
-    ;; Transfer the bet amount STX from user to this contract
     (try! (stx-transfer? (get bet-amount original-game-data) contract-caller THIS_CONTRACT))
-    ;; Update the games map with the new game data
     (map-set games game-id game-data)
 
-    ;; Log the joining of the game
     (print { action: "join-game", data: game-data})
-    ;; Return the Game ID of the game
     (ok game-id)
 ))
-;; Given a board and three cells to look at on the board
-;; Return true if all three are not empty and are the same value (all X or all O)
-;; Return false if any of the three is empty or a different value
-(define-private (is-line (board (list 9 uint)) (a uint) (b uint) (c uint)) 
-    (let (
-        ;; Value of cell at index a
-        (a-val (unwrap! (element-at? board a) false))
-        ;; Value of cell at index b
-        (b-val (unwrap! (element-at? board b) false))
-        ;; Value of cell at index c
-        (c-val (unwrap! (element-at? board c) false))
-    )
 
-    ;; a-val must equal b-val and must also equal c-val while not being empty (non-zero)
-    (and (is-eq a-val b-val) (is-eq a-val c-val) (not (is-eq a-val u0)))
+;; Join game with lending
+(define-public (join-game-with-borrow (game-id uint) (move-index uint) (move uint) (use-lending bool))
+    (let (
+        (original-game-data (unwrap! (map-get? games game-id) ERR_GAME_NOT_FOUND))
+        (original-board (get board original-game-data))
+        (bet-amount (get bet-amount original-game-data))
+        (game-board (unwrap! (replace-at? original-board move-index move) ERR_INVALID_MOVE))
+    )
+    (asserts! (is-none (get player-two original-game-data)) ERR_GAME_CANNOT_BE_JOINED)
+    (asserts! (is-eq move u2) ERR_INVALID_MOVE)
+    (asserts! (validate-move original-board move-index move) ERR_INVALID_MOVE)
+
+    (if use-lending
+        ;; Borrow from lending pool
+        (let (
+            (borrow-id (unwrap! (contract-call? lending-pool-contract borrow-for-game bet-amount contract-caller) ERR_BORROW_FAILED))
+        )
+            (try! (stx-transfer? bet-amount contract-caller THIS_CONTRACT))
+            (map-set games game-id (merge original-game-data {
+                board: game-board,
+                player-two: (some contract-caller),
+                is-player-one-turn: true,
+                player-o-borrowed: true,
+                player-o-borrow-id: (some borrow-id)
+            }))
+            (print { action: "join-game-with-borrow", data: { game-id: game-id, borrow-id: borrow-id }})
+            (ok game-id)
+        )
+        ;; Traditional join
+        (begin
+            (try! (stx-transfer? bet-amount contract-caller THIS_CONTRACT))
+            (map-set games game-id (merge original-game-data {
+                board: game-board,
+                player-two: (some contract-caller),
+                is-player-one-turn: true
+            }))
+            (print { action: "join-game", data: game-id})
+            (ok game-id)
+        )
+    )
 ))
 
-;; Given a board, return true if any possible three-in-a-row line has been completed
-(define-private (has-won (board (list 9 uint))) 
-    (or
-        (is-line board u0 u1 u2) ;; Row 1
-        (is-line board u3 u4 u5) ;; Row 2
-        (is-line board u6 u7 u8) ;; Row 3
-        (is-line board u0 u3 u6) ;; Column 1
-        (is-line board u1 u4 u7) ;; Column 2
-        (is-line board u2 u5 u8) ;; Column 3
-        (is-line board u0 u4 u8) ;; Left to Right Diagonal
-        (is-line board u2 u4 u6) ;; Right to Left Diagonal
-    )
-)
+;; ===== PLAY GAME =====
 
 (define-public (play (game-id uint) (move-index uint) (move uint))
     (let (
-        ;; Load the game data for the game being joined, throw an error if Game ID is invalid
-        (original-game-data (unwrap! (map-get? games game-id) (err ERR_GAME_NOT_FOUND)))
-        ;; Get the original board from the game data
+        (original-game-data (unwrap! (map-get? games game-id) ERR_GAME_NOT_FOUND))
         (original-board (get board original-game-data))
-
-        ;; Is it player one's turn?
         (is-player-one-turn (get is-player-one-turn original-game-data))
-        ;; Get the player whose turn it currently is based on the is-player-one-turn flag
-        (player-turn (if is-player-one-turn (get player-one original-game-data) (unwrap! (get player-two original-game-data) (err ERR_GAME_NOT_FOUND))))
-        ;; Get the expected move based on whose turn it is (X or O?)
+        (player-turn (if is-player-one-turn (get player-one original-game-data) (unwrap! (get player-two original-game-data) ERR_GAME_NOT_FOUND)))
         (expected-move (if is-player-one-turn u1 u2))
-
-        ;; Update the game board by placing the player's move at the specified index
-        (game-board (unwrap! (replace-at? original-board move-index move) (err ERR_INVALID_MOVE)))
-        ;; Check if the game has been won now with this modified board
+        (game-board (unwrap! (replace-at? original-board move-index move) ERR_INVALID_MOVE))
         (is-now-winner (has-won game-board))
-        ;; Merge the game data with the updated board and marking the next turn to be player two's turn
-        ;; Also mark the winner if the game has been won
         (game-data (merge original-game-data {
             board: game-board,
             is-player-one-turn: (not is-player-one-turn),
             winner: (if is-now-winner (some player-turn) none)
         }))
     )
+    (asserts! (is-eq player-turn contract-caller) ERR_NOT_YOUR_TURN)
+    (asserts! (is-eq move expected-move) ERR_INVALID_MOVE)
+    (asserts! (validate-move original-board move-index move) ERR_INVALID_MOVE)
 
-    ;; Ensure that the function is being called by the player whose turn it is
-    (asserts! (is-eq player-turn contract-caller) (err ERR_NOT_YOUR_TURN))
-    ;; Ensure that the move being played is the correct move based on the current turn (X or O)
-    (asserts! (is-eq move expected-move) (err ERR_INVALID_MOVE))
-    ;; Ensure that the move meets validity requirements
-    (asserts! (validate-move original-board move-index move) (err ERR_INVALID_MOVE))
+    ;; If game won, handle payouts and loan repayments
+    (if is-now-winner
+        (let (
+            (winner player-turn)
+            (loser (if is-player-one-turn 
+                      (unwrap! (get player-two original-game-data) ERR_GAME_NOT_FOUND)
+                      (get player-one original-game-data)))
+            (winner-is-player-one (is-eq winner (get player-one original-game-data)))
+            (winner-borrowed (if winner-is-player-one 
+                                (get player-one-borrowed original-game-data)
+                                (get player-o-borrowed original-game-data)))
+            (winner-borrow-id (if winner-is-player-one 
+                                 (get player-one-borrow-id original-game-data)
+                                 (get player-o-borrow-id original-game-data)))
+            (total-pot (* u2 (get bet-amount game-data)))
+        )
+            ;; If winner borrowed, repay loan from pot
+            (if winner-borrowed
+                (match winner-borrow-id
+                    borrow-id
+                   (let (
+    (borrow-details-opt (unwrap! (contract-call? lending-pool-contract get-borrow-details borrow-id) ERR_BORROW_FAILED))
+    (borrow-details (unwrap! borrow-details-opt ERR_BORROW_FAILED))
+    (repayment-amount (+ (get amount borrow-details) (get interest-owed borrow-details)))
+    (winner-payout (- total-pot repayment-amount))
+)
+                        ;; Repay loan from contract
+                        (try! (as-contract (contract-call? lending-pool-contract repay-borrow borrow-id winner)))
+                        ;; Send remaining to winner
+                        (try! (as-contract (stx-transfer? winner-payout tx-sender winner)))
+                        true
+                    )
+                    false
+                )
+                ;; No loan, send full pot to winner
+                (try! (as-contract (stx-transfer? total-pot tx-sender winner)))
+            )
+            true
+        )
+        false
+    )
 
-    ;; if the game has been won, transfer the (bet amount * 2 = both players bets) STX to the winner
-    (if is-now-winner (try! (as-contract (stx-transfer? (* u2 (get bet-amount game-data)) tx-sender player-turn))) false)
-
-    ;; Update the games map with the new game data
     (map-set games game-id game-data)
-
-    ;; Log the action of a move being made
     (print {action: "play", data: game-data})
-    ;; Return the Game ID of the game
     (ok game-id)
 ))
+
+;; ===== READ-ONLY FUNCTIONS =====
+
 (define-read-only (get-game (game-id uint))
     (map-get? games game-id)
 )

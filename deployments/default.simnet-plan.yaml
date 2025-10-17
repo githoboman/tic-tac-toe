@@ -58,14 +58,18 @@ genesis:
     - pox-4
     - signers
     - signers-voting
-    - costs-4
 plan:
   batches:
     - id: 0
       transactions:
         - emulated-contract-publish:
-            contract-name: tic-tac-toe
+            contract-name: lending-pool-v2
             emulated-sender: ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM
-            path: contracts/tic-tac-toe.clar
+            path: "contracts\\lending-pool-v2.clar"
+            clarity-version: 3
+        - emulated-contract-publish:
+            contract-name: tic-tac-toe-v2
+            emulated-sender: ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM
+            path: "contracts\\tic-tac-toe.clar"
             clarity-version: 3
       epoch: "3.2"

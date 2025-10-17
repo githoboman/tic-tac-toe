@@ -37,11 +37,12 @@ export function useStacks() {
     setUserData(null);
   }
 
-  async function handleCreateGame(
-    betAmount: number,
-    moveIndex: number,
-    move: Move
-  ) {
+ async function handleCreateGame(
+  betAmount: number,
+  moveIndex: number,
+  move: Move,
+  useLending: boolean = false
+) {
     if (typeof window === "undefined") return;
     if (moveIndex < 0 || moveIndex > 8) {
       window.alert("Invalid move. Please make a valid move.");
@@ -54,13 +55,17 @@ export function useStacks() {
 
     try {
       if (!userData) throw new Error("User not connected");
-      const txOptions = await createNewGame(betAmount, moveIndex, move);
+     const txOptions = await createNewGame(betAmount, moveIndex, move, useLending);
       await openContractCall({
         ...txOptions,
         appDetails,
         onFinish: (data) => {
           console.log(data);
-          window.alert("Sent create game transaction");
+          window.alert(
+  useLending 
+    ? "Sent create game transaction with loan!" 
+    : "Sent create game transaction"
+);
         },
         postConditionMode: PostConditionMode.Allow,
       });
@@ -71,7 +76,7 @@ export function useStacks() {
     }
   }
 
-  async function handleJoinGame(gameId: number, moveIndex: number, move: Move) {
+ async function handleJoinGame(gameId: number, moveIndex: number, move: Move, useLending: boolean = false) {
     if (typeof window === "undefined") return;
     if (moveIndex < 0 || moveIndex > 8) {
       window.alert("Invalid move. Please make a valid move.");
@@ -80,13 +85,17 @@ export function useStacks() {
 
     try {
       if (!userData) throw new Error("User not connected");
-      const txOptions = await joinGame(gameId, moveIndex, move);
+      const txOptions = await joinGame(gameId, moveIndex, move, useLending);
       await openContractCall({
         ...txOptions,
         appDetails,
         onFinish: (data) => {
           console.log(data);
-          window.alert("Sent join game transaction");
+         window.alert(
+  useLending 
+    ? "Sent join game transaction with loan!" 
+    : "Sent join game transaction"
+);
         },
         postConditionMode: PostConditionMode.Allow,
       });
@@ -152,3 +161,4 @@ export function useStacks() {
     handlePlayGame,
   };
 }
+

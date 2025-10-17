@@ -1,6 +1,7 @@
 import { STACKS_TESTNET } from "@stacks/network";
 import {
   BooleanCV,
+  boolCV,
   cvToValue,
   fetchCallReadOnlyFunction,
   ListCV,
@@ -12,8 +13,8 @@ import {
 } from "@stacks/transactions";
 
 // REPLACE THESE WITH YOUR OWN
-const CONTRACT_ADDRESS = "ST3P49R8XXQWG69S66MZASYPTTGNDKK0WW32RRJDN";
-const CONTRACT_NAME = "tic-tac-toe";
+const CONTRACT_ADDRESS = "ST9NSDHK5969YF6WJ2MRCVVAVTDENWBNTFJRVZ3E";
+const CONTRACT_NAME = "tic-tac-toe-v2";
 
 type GameCV = {
   "player-one": PrincipalCV;
@@ -114,24 +115,44 @@ export async function getGame(gameId: number) {
 export async function createNewGame(
   betAmount: number,
   moveIndex: number,
-  move: Move
+  move: Move,
+  useLending: boolean = false
 ) {
+  const functionName = useLending ? "create-game-with-borrow" : "create-game";
+  
   const txOptions = {
     contractAddress: CONTRACT_ADDRESS,
     contractName: CONTRACT_NAME,
-    functionName: "create-game",
-    functionArgs: [uintCV(betAmount), uintCV(moveIndex), uintCV(move)],
+    functionName,
+    functionArgs: [
+      uintCV(betAmount),
+      uintCV(moveIndex),
+      uintCV(move),
+      boolCV(useLending)
+    ],
   };
 
   return txOptions;
 }
 
-export async function joinGame(gameId: number, moveIndex: number, move: Move) {
+export async function joinGame(
+  gameId: number,
+  moveIndex: number,
+  move: Move,
+  useLending: boolean = false
+) {
+  const functionName = useLending ? "join-game-with-borrow" : "join-game";
+  
   const txOptions = {
     contractAddress: CONTRACT_ADDRESS,
     contractName: CONTRACT_NAME,
-    functionName: "join-game",
-    functionArgs: [uintCV(gameId), uintCV(moveIndex), uintCV(move)],
+    functionName,
+    functionArgs: [
+      uintCV(gameId),
+      uintCV(moveIndex),
+      uintCV(move),
+      boolCV(useLending)
+    ],
   };
 
   return txOptions;
